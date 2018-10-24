@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Magnetic test">
+    <meta name="author" content="Diogo Slepetys">
+
+    <title>Mag3D</title>
+	
+</head>
+
+<body id="page-top" style="margin: 0; font-family: 'Play', sans-serif;">
+
+	<button onclick="connect2node()" >Connect!</button>
+	<button onclick="estimateFromTable()" >Find Position!</button>
+	<button onclick="calibrate()" >Calibrate!</button>
+
+	<table>
+		<tr>
+			<td><p id="alpha">Message...</p></td>
+			<td><p id="beta">Message...</p></td>
+			<td><p id="gamma">Message...</p></td>
+		</tr>
+		<tr>
+			<td><p id="xa">Message...</p></td>
+			<td><p id="ya">Message...</p></td>
+			<td><p id="za">Message...</p></td>
+		</tr>
+	</table>
+
+<!--ThreeJS library-->
+<script src="build/three.js"></script>
+
+<script src="build/orbitControls.js"></script>
+
+<script src="LunarGlow.js"></script>
+	
+<script>
+
+	/* round */
+	var roundX = [];
+	var roundY = [];
+	var roundZ = [];
+	roundCounter = 0;
+	
+	function updateRound(){//coleta 10 valores de magnetômetro e os coloca num array para arredondamento
+	
+		roundX[roundCounter] = -magAlpha*10e-3;
+		roundY[roundCounter] = magGamma*10e-3;//inverted z
+		roundZ[roundCounter] = magBeta*10e-3;//and y
+		roundCounter++;
+		if(roundCounter == 10){
+			roundCounter = 0;
+		}
+		//console.log(roundX);
+	}
+	/* end round */
+
+
+	/*Open Socket Connection*/
+	var mySocket = null;
+	
+	var magAlpha = 0;
+	var magBeta = 0;
+	var magGamma = 0;
+	var accelx = 0;
+	var accely = 0;
+	var accelz = 0;
+	
+	function connect2node()
+	{
+		console.log("Attempting to connect...");
+		mySocket = new WebSocket("ws://localhost:2525");// ws: unsafe socket, wss: safe socket "ws://192.168.42.28:8887"
+
+		
+		mySocket.onopen = function()
+		{	
+			mySocket.send("hey there");
+			console.log("connected!");
+		}
+		mySocket.onmessage = function (event) 
+		{ 
+			var received_msg = event.data;
+			
+			var split = received_msg.split(":");
+			
+			if(split[0] == 'alpha'){
+				document.getElementById("alpha").innerHTML = split[1];
+				magAlpha = split[1];
+			}
+			if(split[0] == 'beta'){
+				document.getElementById("beta").innerHTML = split[1];
+				magBeta = split[1];
+			}
+			if(split[0] == 'gamma'){
+				document.getElementById("gamma").innerHTML = split[1];
+				magGamma = split[1];
+			}
+			if(split[0] == 'x'){
+				document.getElementById("xa").innerHTML = split[1];
+				accelx = split[1];
+			}
+			if(split[0] == 'y'){
+				document.getElementById("ya").innerHTML = split[1];
+				accely = split[1];
+			}
+			if(split[0] == 'z'){
+				document.getElementById("za").innerHTML = split[1];
+				accelz = split[1];
+			}
+			updateRound();
+			//console.log(received_msg);
+		}
+	}
+	/*End Open Connection*/
+
+	
+	/*THREE*/
+	var meshe;
+	var axiss;
+	var poX = window.innerWidth/2;
+	var poY = window.innerHeight/2;
+	var globalLight;
+	var starsMaterial;
+	var controls;
+	var movincube;
+	var time2Estimate = 0;
+	var ready2Estimate = 0;
+	
+	//calibration
+	var earthFieldx, earthFieldy, earthFieldz = 0;
+	function calibrate(){	
+		earthFieldx = magAlpha*10e-3;
+		earthFieldy = magBeta*10e-3;
+		earthFieldz = magGamma*10e-3;
+	}
+	//end calibration
+	
+
+	//Parameters
+	var Bx = 0;
+	var By = 0;
+	var Bz = 0;
+	var module = 0;
+	var max = 0;
+	var mx = 0;
+	var my = 0;
+	var mz = 0;
+	var counter = 0;
+	var field = new Array();
+
+	//Calculates points from a magnetic dipole model and pushes em into an array
+	/*
+	for (i = -3; i < 3.05; i += 0.05) {
+		for (j = -3; j < 3.05; j += 0.05) { 
+			for (k = -3; k < 3.05; k += 0.05) {
+				
+				Bx = (3*Math.pow(i,2)/(Math.pow(Math.sqrt(Math.pow(i,2)+Math.pow(j,2)+Math.pow(k,2)),5))) - (1/(Math.pow(Math.sqrt(Math.pow(i,2)+Math.pow(j,2)+Math.pow(k,2)),3)));
+				By = (3*i*j)/(Math.pow(Math.sqrt(Math.pow(i,2)+Math.pow(j,2)+Math.pow(k,2)),5));
+				Bz = (3*i*k)/(Math.pow(Math.sqrt(Math.pow(i,2)+Math.pow(j,2)+Math.pow(k,2)),5));
+				
+				module = Math.sqrt(Math.pow(Bx,2)+Math.pow(By,2)+Math.pow(Bz,2));
+				
+				field.push([module,Bx,By,Bz,i,j,k]);
+				counter++;
+			}
+		}
+	}*/
+	
+	//pontos coletados: 7 valores lidos em 5 colunas = 35 pontos (aqui a altura está fixa)
+	var t0 = [
+		[{x:15, y:104, z:90},{x:-30, y:131, z:172},{x:-107, y:85, z:244},{x:-130, y:-11, z:265},{x:-79, y:-95, z:212},{x:-11, y:-101, z:129},{x:16, y:-51, z:68}],
+		[{x:-7, y:77, z:49},{x:-35, y:80, z:78},{x:-70, y:52, z:104},{x:-80, y:0, z:110},{x:-63, y:-34, z:97},{x:-30, y:-48, z:68},{x:-3, y:-40, z:52}],
+		[{x:-13, y:52, z:44},{x:-32, y:48, z:57},{x:-48, y:33, z:65},{x:-55, y:6, z:72},{x:-46, y:-13, z:65},{x:-30, y:-24, z:54},{x:-11, y:-25, z:41}],
+		[{x:-11, y:38, z:31},{x:-23, y:34, z:37},{x:-31, y:25, z:41},{x:-33, y:11, z:43},{x:-30, y:-2, z:40},{x:-20, y:-10, z:36},{x:-10, y:-11, z:30}],
+		[{x:-9, y:30, z:24},{x:-15, y:26, z:26},{x:-20, y:20, z:29},{x:-15, y:12, z:29},{x:-16, y:6, z:28},{x:-11, y:2, z:25},{x:-6, y:0, z:22}]
+	];
+	
+	//console.log(t0[0][0]);
+	
+	function estimateFromTable() //essa função verifica qual dos pontos na tabela é o mais próximo do ponto atual (por soma dos quadrados das diferenças)
+	{
+		ready2Estimate = 1;
+		var squares = 50000;//iniciamos com um erro grande, a ser diminuido
+		var answer = 0; 
+		var pos;
+		
+		for(var y1 = 0; y1 < 5; y1++){
+			for(var x1 = 0; x1 < 7; x1++){
+			
+				answer = Math.pow(magAlpha - t0[y1][x1].x, 2) + Math.pow(magBeta - t0[y1][x1].y, 2) + Math.pow(magGamma - t0[y1][x1].z, 2);
+				
+				if( answer < squares ){//se o erro obtido for menor, answer passa a ser o menor erro e um vetor é escolhido
+					squares = answer;
+					pos = [x1,y1];
+				}
+			}
+		}
+	    //ao final do loop, encontramos o vetor mais próximo, agora basta usar sua posição para setar a posição do cubo (na aplicação ideal, falta interpolar com os vetores vizinhos)
+		movincube.position.x = (pos[0]*10) -30;
+		movincube.position.y = 0;//nesse teste, as medidas foram feitas sempre no mesmo plano
+		movincube.position.z = (pos[1]*10) -30;
+	}
+
+	//inicialização da cena e do three.js
+	init();
+	initLights();
+	animate();
+	
+	function init()
+	{
+		
+		camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 1, 1000 );
+		camera.position.z = 50;
+		camera.position.y = 0;
+		camera.rotation.x = 0;	
+		controls = new THREE.OrbitControls( camera );
+		scene = new THREE.Scene();
+		
+		//axis
+		new THREE.ObjectLoader().load( 'axis.js', function ( object ) {
+			object.traverse( function ( o ) {
+			if ( o.type == "Mesh" && o.material && ! o.material.transparent ) {
+			o.material.side = THREE.DoubleSide;
+			}
+			var tex = new THREE.TextureLoader().load( 'axis2.png' );
+
+			var material = new THREE.MeshBasicMaterial({map: tex});
+			axiss = new THREE.Mesh(o.geometry, material);
+			axiss.scale.x = axiss.scale.y = axiss.scale.z = 5;
+			axiss.position.y += 0;
+			axiss.position.x += 0;
+			axiss.position.z -= 0;
+			var axissrev = axiss.clone();
+			axissrev.rotation.y = Math.PI;
+			scene.add( axiss );
+			scene.add( axissrev )
+			axiss.eulerOrder = 'XYZ';
+			} );
+		} );
+		
+		// 5cm ruler
+		var geometry = new THREE.BoxGeometry( 0.3, 1, 1 );
+		var material = new THREE.MeshBasicMaterial( {color: 0x000000} );
+		var cube = new THREE.Mesh( geometry, material );
+		cube.position.x = 5;
+		scene.add( cube );
+		// 5cm ruler
+		var cube = new THREE.Mesh( geometry, material );
+		cube.position.x = 10;
+		scene.add( cube );
+		// 5cm ruler
+		var cube = new THREE.Mesh( geometry, material );
+		cube.position.x = 15;
+		scene.add( cube );
+		
+		//cube
+		var geometry2 = new THREE.BoxGeometry( 2, 2, 2 );
+		var material2 = new THREE.MeshBasicMaterial( {color: 0x4488dd} );
+		movincube = new THREE.Mesh( geometry2, material2 );
+		scene.add( movincube );
+
+		//renderer
+		renderer = new THREE.WebGLRenderer({ antialias: true });
+		renderer.setPixelRatio( window.devicePixelRatio );
+		renderer.setSize( window.innerWidth, window.innerHeight );
+		renderer.setClearColor(0xaaaaaa);//0x010508
+		renderer.sortObjects = true;
+		document.body.appendChild( renderer.domElement );
+		
+		window.addEventListener( 'resize', onWindowResize, false );
+		
+	}
+	
+	function initLights() {
+	
+		globalLight = new THREE.AmbientLight(0xffffff, 0.8);
+		scene.add(globalLight);
+		
+	}
+ 
+	function onWindowResize() {
+
+		camera.aspect = window.innerWidth / window.innerHeight;
+		camera.updateProjectionMatrix();
+
+		renderer.setSize( window.innerWidth, window.innerHeight );
+	}
+	
+	function animate() {
+	
+		requestAnimationFrame( animate );
+		
+		controls.update();
+		document.onmousemove = function(event) {
+			poY = event.clientY;
+			poX = event.clientX;
+		}
+		
+		document.onmouseout = function(event) {
+			poY = window.innerHeight/2;
+			poX = window.innerWidth/2;
+		}
+	
+		//meshe.rotation.z = magAlpha*Math.PI/180;
+		//meshe.rotation.y = magBeta*Math.PI/180;
+		//meshe.rotation.x = magGamma*Math.PI/180;
+		
+		//linearizing x axis                        
+		//movincube.position.x = 100 * ((Math.log(-1*magAlpha) - Math.log(4776))/-29.4);
+
+		
+		//globalLight.color.setRGB(accelx/10, accely/10, accelz/10, 1.0);
+		
+		//magnetic module
+		//var module = Math.sqrt(magAlpha*magAlpha + magBeta*magBeta + magGamma*magGamma);
+		//console.log(module);
+		//meshe.scale.x = meshe.scale.y = meshe.scale.z = 4*Math.pow(module, 0.3);
+		
+		if((Date.now() > time2Estimate + 10) && ready2Estimate == 1){//estimate position ocasionally
+			estimateFromTable()
+			time2Estimate = Date.now();
+		}
+		
+		renderer.render( scene, camera );
+	}
+	
+	
+	
+	
+</script>
+
+</body>
+
+</html>
